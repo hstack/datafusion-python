@@ -16,7 +16,8 @@
 // under the License.
 
 use std::sync::Arc;
-
+use arrow::array::Float64Array;
+use arrow::pyarrow::IntoPyArrow;
 use pyo3::{prelude::*, types::PyTuple};
 
 use datafusion::arrow::array::{make_array, Array, ArrayData, ArrayRef};
@@ -24,10 +25,9 @@ use datafusion::arrow::datatypes::DataType;
 use datafusion::arrow::pyarrow::FromPyArrow;
 use datafusion::arrow::pyarrow::{PyArrowType, ToPyArrow};
 use datafusion::error::DataFusionError;
-use datafusion::logical_expr::create_udf;
+use datafusion::logical_expr::{create_udf, ColumnarValue};
 use datafusion::logical_expr::function::ScalarFunctionImplementation;
 use datafusion::logical_expr::ScalarUDF;
-
 use crate::expr::PyExpr;
 use crate::utils::parse_volatility;
 
@@ -35,28 +35,64 @@ use crate::utils::parse_volatility;
 /// that expects pyarrow arrays. This is more efficient as it performs
 /// a zero-copy of the contents.
 fn to_rust_function(func: PyObject) -> ScalarFunctionImplementation {
-    #[allow(deprecated)]
-    datafusion::physical_plan::functions::make_scalar_function(
-        move |args: &[ArrayRef]| -> Result<ArrayRef, DataFusionError> {
-            Python::with_gil(|py| {
-                // 1. cast args to Pyarrow arrays
-                let py_args = args
-                    .iter()
-                    .map(|arg| arg.into_data().to_pyarrow(py).unwrap())
-                    .collect::<Vec<_>>();
-                let py_args = PyTuple::new_bound(py, py_args);
+    let func = Arc::new(move |args: &[ColumnarValue]| {
+        // let arg =&args[0];
+        // arg.in
+        Python::with_gil(|py| {
+            // 1. cast args to Pyarrow arrays
+            let py_args = args
+                .iter()
+                .map(|arg| {
+                    match arg {
+                        ColumnarValue::Array(array) => {
+                            array.into_data().to_pyarrow(py).unwrap()
+                        }
+                        ColumnarValue::Scalar(scalar) => {
+                            scalar.to_pyarrow(py).unwrap()
+                        }
+                    }
+                    // arg.into_data().to_pyarrow(py).unwrap()}
+                })
+                .collect::<Vec<_>>();
+            let py_args = PyTuple::new_bound(py, py_args);
 
-                // 2. call function
-                let value = func
-                    .call_bound(py, py_args, None)
-                    .map_err(|e| DataFusionError::Execution(format!("{e:?}")))?;
+            // 2. call function
+            let value = func
+                .call_bound(py, py_args, None)
+                .map_err(|e| DataFusionError::Execution(format!("{e:?}")))?;
 
-                // 3. cast to arrow::array::Array
-                let array_data = ArrayData::from_pyarrow_bound(value.bind(py)).unwrap();
-                Ok(make_array(array_data))
-            })
-        },
-    )
+            // 3. cast to arrow::array::Array
+            let array_data = ArrayData::from_pyarrow_bound(value.bind(py)).unwrap();
+            let output_array_ref = make_array(array_data);
+            Ok(ColumnarValue::from(Arc::new(output_array_ref) as ArrayRef))
+        })
+
+        // Ok(ColumnarValue::from(Arc::new(array) as ArrayRef))
+    });
+    func
+
+    // #[allow(deprecated)]
+    // datafusion::physical_plan::functions::make_scalar_function(
+    //     move |args: &[ArrayRef]| -> Result<ArrayRef, DataFusionError> {
+    //         Python::with_gil(|py| {
+    //             // 1. cast args to Pyarrow arrays
+    //             let py_args = args
+    //                 .iter()
+    //                 .map(|arg| arg.into_data().to_pyarrow(py).unwrap())
+    //                 .collect::<Vec<_>>();
+    //             let py_args = PyTuple::new_bound(py, py_args);
+    //
+    //             // 2. call function
+    //             let value = func
+    //                 .call_bound(py, py_args, None)
+    //                 .map_err(|e| DataFusionError::Execution(format!("{e:?}")))?;
+    //
+    //             // 3. cast to arrow::array::Array
+    //             let array_data = ArrayData::from_pyarrow_bound(value.bind(py)).unwrap();
+    //             Ok(make_array(array_data))
+    //         })
+    //     },
+    // )
 }
 
 /// Represents a PyScalarUDF
@@ -80,7 +116,7 @@ impl PyScalarUDF {
         let function = create_udf(
             name,
             input_types.0,
-            Arc::new(return_type.0),
+            return_type.0,
             parse_volatility(volatility)?,
             to_rust_function(func),
         );
