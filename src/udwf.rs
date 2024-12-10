@@ -320,7 +320,7 @@ impl WindowUDFImpl for MultiColumnWindowUDF {
         (self.partition_evaluator_factory)()
     }
 
-    fn expressions(&self, expr_args: ExpressionArgs) -> Vec<Arc<dyn PhysicalExpr>> {
+    fn expressions(&self, expr_args: datafusion_expr::function::ExpressionArgs<'_>) -> Vec<Arc<dyn PhysicalExpr>> {
         expr_args.input_exprs().into()
     }
 }
