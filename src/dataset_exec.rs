@@ -37,10 +37,10 @@ use datafusion::logical_expr::Expr;
 use datafusion::physical_expr::{EquivalenceProperties, LexOrdering};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{
-    DisplayAs, DisplayFormatType, ExecutionMode, ExecutionPlan, ExecutionPlanProperties,
+    DisplayAs, DisplayFormatType, ExecutionPlan, ExecutionPlanProperties,
     Partitioning, SendableRecordBatchStream, Statistics,
 };
-
+use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use crate::errors::DataFusionError;
 use crate::pyarrow_filter_expression::PyArrowFilterExpression;
 
@@ -136,7 +136,8 @@ impl DatasetExec {
         let plan_properties = datafusion::physical_plan::PlanProperties::new(
             EquivalenceProperties::new(schema.clone()),
             Partitioning::UnknownPartitioning(fragments.len()),
-            ExecutionMode::Bounded,
+            EmissionType::Both,
+            Boundedness::Bounded,
         );
 
         Ok(DatasetExec {
@@ -255,12 +256,16 @@ impl ExecutionPlanProperties for DatasetExec {
         None
     }
 
-    fn execution_mode(&self) -> datafusion::physical_plan::ExecutionMode {
-        self.plan_properties.execution_mode
-    }
-
     fn equivalence_properties(&self) -> &datafusion::physical_expr::EquivalenceProperties {
         &self.plan_properties.eq_properties
+    }
+
+    fn boundedness(&self) -> Boundedness {
+        self.plan_properties.boundedness
+    }
+
+    fn pipeline_behavior(&self) -> EmissionType {
+        self.plan_properties.emission_type
     }
 }
 
