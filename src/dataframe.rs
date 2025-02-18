@@ -27,18 +27,27 @@ use arrow::util::display::{ArrayFormatter, FormatOptions};
 use datafusion::arrow::datatypes::Schema;
 use datafusion::arrow::pyarrow::{PyArrowType, ToPyArrow};
 use datafusion::arrow::util::pretty;
-use datafusion::common::UnnestOptions;
+use datafusion::common::stats::Precision;
+use datafusion::common::{DFSchema, DataFusionError, UnnestOptions};
 use datafusion::config::{CsvOptions, TableParquetOptions};
 use datafusion::dataframe::{DataFrame, DataFrameWriteOptions};
+use datafusion::execution::runtime_env::RuntimeEnvBuilder;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
+use datafusion::physical_plan::ExecutionPlan;
 use datafusion::prelude::*;
+
+use datafusion_proto::physical_plan::{AsExecutionPlan, PhysicalExtensionCodec};
+use datafusion_proto::protobuf::PhysicalPlanNode;
+use deltalake::delta_datafusion::DeltaPhysicalCodec;
+use prost::Message;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
 use pyo3::types::{PyCapsule, PyTuple, PyTupleMethods};
 use tokio::task::JoinHandle;
 
+use crate::common::df_schema::PyDFSchema;
 use crate::errors::{py_datafusion_err, PyDataFusionError};
 use crate::expr::sort_expr::to_sort_expressions;
 use crate::physical_plan::PyExecutionPlan;
@@ -659,6 +668,73 @@ impl PyDataFrame {
     fn count(&self, py: Python) -> PyDataFusionResult<usize> {
         Ok(wait_for_future(py, self.df.as_ref().clone().count())?)
     }
+
+    fn distributed_plan(&self, py: Python<'_>) -> PyResult<DistributedPlan> {
+        let future_plan = self.df.as_ref().clone().create_physical_plan();
+        let physical_plan = wait_for_future(py, future_plan).map_err(py_datafusion_err)?;
+        DistributedPlan::try_new(physical_plan).map_err(py_datafusion_err)
+    }
+
+}
+
+#[pyclass(get_all)]
+#[derive(Debug, Clone)]
+pub struct DistributedPlan {
+    physical_plan: Vec<u8>,
+    schema: PyDFSchema,
+    num_partitions: usize,
+    num_bytes: Option<usize>,
+    num_rows: Option<usize>,
+}
+
+fn codec() -> &'static dyn PhysicalExtensionCodec {
+    static CODEC: DeltaPhysicalCodec = DeltaPhysicalCodec {};
+    &CODEC
+}
+
+impl DistributedPlan {
+    fn try_new(plan: Arc<dyn ExecutionPlan>) -> Result<Self, DataFusionError> {
+        fn extract(prec: Precision<usize>) -> Option<usize> {
+            match prec {
+                Precision::Exact(n) => Some(n),
+                _ => None,
+            }
+        }
+        let (num_bytes, num_rows) = if let Ok(stats) = plan.statistics() {
+            let bytes = extract(stats.total_byte_size);
+            let rows = extract(stats.num_rows);
+            (bytes, rows)
+        } else {
+            (None, None)
+        };
+
+        let schema = DFSchema::try_from(plan.schema())
+            .map(PyDFSchema::from)?;
+        let num_partitions = plan.properties().partitioning.partition_count();
+        let physical_plan = PhysicalPlanNode::try_from_physical_plan(plan, codec())?
+            .encode_to_vec();
+        Ok(Self { physical_plan, schema, num_partitions, num_bytes, num_rows })
+    }
+
+}
+
+#[pyfunction]
+pub fn partition_stream(serialized_plan: &[u8], partition: usize, py: Python) -> PyResult<PyRecordBatchStream> {
+    deltalake::ensure_initialized();
+    let ctx = SessionContext::new();
+    let runtime = RuntimeEnvBuilder::new().build().map_err(py_datafusion_err)?;
+    let node = PhysicalPlanNode::decode(serialized_plan)
+        .map_err(|e| DataFusionError::External(Box::new(e)))
+        .map_err(py_datafusion_err)?;
+    let plan = node.try_into_physical_plan(&ctx, &runtime, codec())
+        .map_err(py_datafusion_err)?;
+    let stream_with_runtime = get_tokio_runtime().0.spawn(async move {
+        plan.execute(partition, ctx.task_ctx())
+    });
+    wait_for_future(py, stream_with_runtime)
+        .map_err(py_datafusion_err)?
+        .map(PyRecordBatchStream::new)
+        .map_err(py_datafusion_err)
 }
 
 /// Print DataFrame
