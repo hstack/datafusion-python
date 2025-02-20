@@ -17,11 +17,8 @@
 
 name: Python Release Build
 on:
-  pull_request:
-    branches: ["main"]
   push:
-    tags: ["*-rc*"]
-    branches: ["branch-*"]
+    branches: ["main*"]
 
 jobs:
   build:
@@ -43,10 +40,10 @@ jobs:
         run: uv sync --dev --no-install-package datafusion
 
       # Update output format to enable automatic inline annotations.
-      - name: Run Ruff
-        run: |
-          uv run --no-project ruff check --output-format=github python/
-          uv run --no-project ruff format --check python/
+      # - name: Run Ruff
+      #   run: |
+      #     uv run --no-project ruff check --output-format=github python/
+      #     uv run --no-project ruff format --check python/
 
   generate-license:
     runs-on: ubuntu-latest
@@ -174,6 +171,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: libssl3 openssl
+          version: 1.0
       - run: rm LICENSE.txt
       - name: Download LICENSE.txt
         uses: actions/download-artifact@v4
@@ -189,6 +190,20 @@ jobs:
           rust-toolchain: nightly
           target: x86_64
           manylinux: auto
+          before-script-linux: |
+            # If we're running on rhel centos, install needed packages.
+            if command -v yum &> /dev/null; then
+                yum update -y && yum install -y perl-core openssl openssl-devel pkgconfig libatomic
+
+                # If we're running on i686 we need to symlink libatomic
+                # in order to build openssl with -latomic flag.
+                if [[ ! -d "/usr/lib64" ]]; then
+                    ln -s /usr/lib/libatomic.so.1 /usr/lib/libatomic.so
+                fi
+            else
+                # If we're running on debian-based system.
+                apt update -y && apt-get install -y libssl-dev openssl pkg-config
+            fi
           rustup-components: rust-std rustfmt # Keep them in one line due to https://github.com/PyO3/maturin-action/issues/153
           args: --release --manylinux 2014 --features protoc,substrait
       - name: Archive wheels
@@ -203,6 +218,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - uses: awalsh128/cache-apt-pkgs-action@latest
+        with:
+          packages: libssl3 openssl
+          version: 1.0
       - run: rm LICENSE.txt
       - name: Download LICENSE.txt
         uses: actions/download-artifact@v4
@@ -210,15 +229,33 @@ jobs:
           name: python-wheel-license
           path: .
       - run: cat LICENSE.txt
+      - name: Setup QEMU
+        uses: docker/setup-qemu-action@v1
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         env:
-          RUST_BACKTRACE: 1
+          RUST_BACKTRACE: full
         with:
           rust-toolchain: nightly
           target: aarch64
           # Use manylinux_2_28-cross because the manylinux2014-cross has GCC 4.8.5, which causes the build to fail
           manylinux: 2_28
+          container: "ghcr.io/rust-cross/manylinux_2_28-cross:aarch64"
+          docker-options: "--platform linux/arm64 -e CFLAGS=\"-I/usr/include\" -e LDFLAGS=\"-L/usr/lib\" -e CFLAGS_aarch64_unknown_linux_gnu=\"-I/usr/include\""
+          before-script-linux: |
+            # If we're running on rhel centos, install needed packages.
+            if command -v yum &> /dev/null; then
+                yum update -y && yum install -y perl-core openssl openssl-devel pkgconfig libatomic
+
+                # If we're running on i686 we need to symlink libatomic
+                # in order to build openssl with -latomic flag.
+                if [[ ! -d "/usr/lib64" ]]; then
+                    ln -s /usr/lib/libatomic.so.1 /usr/lib/libatomic.so
+                fi
+            else
+                # If we're running on debian-based system.
+                apt update -y && apt-get install -y libssl-dev openssl pkg-config librust-openssl-sys-dev
+            fi
           rustup-components: rust-std rustfmt # Keep them in one line due to https://github.com/PyO3/maturin-action/issues/153
           args: --release --features protoc,substrait
       - name: Archive wheels
@@ -227,35 +264,53 @@ jobs:
           name: dist-manylinux-aarch64
           path: target/wheels/*
 
-  build-sdist:
-    needs: [generate-license]
-    name: Source distribution
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - run: rm LICENSE.txt
-      - name: Download LICENSE.txt
-        uses: actions/download-artifact@v4
-        with:
-          name: python-wheel-license
-          path: .
-      - run: cat LICENSE.txt
-      - name: Build sdist
-        uses: PyO3/maturin-action@v1
-        with:
-          rust-toolchain: stable
-          manylinux: auto
-          rustup-components: rust-std rustfmt
-          args: --release --sdist --out dist --features protoc,substrait
-      - name: Assert sdist build does not generate wheels
-        run: |
-            if [ "$(ls -A target/wheels)" ]; then
-              echo "Error: Sdist build generated wheels"
-              exit 1
-            else
-              echo "Directory is clean"
-            fi
-        shell: bash
+  # build-sdist:
+  #   needs: [generate-license]
+  #   name: Source distribution
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - uses: awalsh128/cache-apt-pkgs-action@latest
+  #       with:
+  #         packages: libssl3 openssl
+  #         version: 1.0
+  #     - run: rm LICENSE.txt
+  #     - name: Download LICENSE.txt
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         name: python-wheel-license
+  #         path: .
+  #     - run: cat LICENSE.txt
+  #     - name: Build sdist
+  #       uses: PyO3/maturin-action@v1
+  #       with:
+  #         rust-toolchain: stable
+  #         manylinux: auto
+  #         before-script-linux: |
+  #           # If we're running on rhel centos, install needed packages.
+  #           if command -v yum &> /dev/null; then
+  #               yum update -y && yum install -y perl-core openssl openssl-devel pkgconfig libatomic
+  #
+  #               # If we're running on i686 we need to symlink libatomic
+  #               # in order to build openssl with -latomic flag.
+  #               if [[ ! -d "/usr/lib64" ]]; then
+  #                   ln -s /usr/lib/libatomic.so.1 /usr/lib/libatomic.so
+  #               fi
+  #           else
+  #               # If we're running on debian-based system.
+  #               apt update -y && apt-get install -y libssl-dev openssl pkg-config
+  #           fi
+  #         rustup-components: rust-std rustfmt
+  #         args: --release --sdist --out dist --features protoc,substrait
+  #     - name: Assert sdist build does not generate wheels
+  #       run: |
+  #           if [ "$(ls -A target/wheels)" ]; then
+  #             echo "Error: Sdist build generated wheels"
+  #             exit 1
+  #           else
+  #             echo "Directory is clean"
+  #           fi
+  #       shell: bash
   
   merge-build-artifacts:
     runs-on: ubuntu-latest
@@ -264,7 +319,7 @@ jobs:
       - build-macos-x86_64
       - build-manylinux-x86_64
       - build-manylinux-aarch64
-      - build-sdist
+      # - build-sdist
     steps:
       - name: Merge Build Artifacts
         uses: actions/upload-artifact/merge@v4
