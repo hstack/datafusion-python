@@ -28,13 +28,14 @@ use datafusion::arrow::datatypes::Schema;
 use datafusion::arrow::pyarrow::{PyArrowType, ToPyArrow};
 use datafusion::arrow::util::pretty;
 use datafusion::common::stats::Precision;
-use datafusion::common::{DFSchema, DataFusionError, UnnestOptions};
-use datafusion::config::{CsvOptions, TableParquetOptions};
+use datafusion::common::{DFSchema, DataFusionError, Statistics, UnnestOptions};
+use datafusion::common::tree_node::{Transformed, TreeNode};
+use datafusion::config::{ConfigOptions, CsvOptions, TableParquetOptions};
 use datafusion::dataframe::{DataFrame, DataFrameWriteOptions};
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
+use datafusion::datasource::physical_plan::ParquetExec;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
-use datafusion::physical_plan::ExecutionPlan;
+use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties};
 use datafusion::prelude::*;
 
 use datafusion_proto::physical_plan::{AsExecutionPlan, PhysicalExtensionCodec};
@@ -54,10 +55,7 @@ use crate::physical_plan::PyExecutionPlan;
 use crate::record_batch::PyRecordBatchStream;
 use crate::sql::logical::PyLogicalPlan;
 use crate::utils::{get_tokio_runtime, validate_pycapsule, wait_for_future};
-use crate::{
-    errors::PyDataFusionResult,
-    expr::{sort_expr::PySortExpr, PyExpr},
-};
+use crate::{errors::PyDataFusionResult, expr::{sort_expr::PySortExpr, PyExpr}};
 
 /// A PyDataFrame is a representation of a logical plan and an API to compose statements.
 /// Use it to build a plan and `.collect()` to execute the plan and collect the result.
@@ -671,8 +669,9 @@ impl PyDataFrame {
 
     fn distributed_plan(&self, py: Python<'_>) -> PyResult<DistributedPlan> {
         let future_plan = self.df.as_ref().clone().create_physical_plan();
-        let physical_plan = wait_for_future(py, future_plan).map_err(py_datafusion_err)?;
-        DistributedPlan::try_new(physical_plan).map_err(py_datafusion_err)
+        wait_for_future(py, future_plan)
+            .map(DistributedPlan::new)
+            .map_err(py_datafusion_err)
     }
 
 }
@@ -680,40 +679,93 @@ impl PyDataFrame {
 #[pyclass(get_all)]
 #[derive(Debug, Clone)]
 pub struct DistributedPlan {
-    physical_plan: Vec<u8>,
-    schema: PyDFSchema,
-    num_partitions: usize,
-    num_bytes: Option<usize>,
-    num_rows: Option<usize>,
+    physical_plan: PyExecutionPlan,
 }
 
-fn codec() -> &'static dyn PhysicalExtensionCodec {
-    static CODEC: DeltaPhysicalCodec = DeltaPhysicalCodec {};
-    &CODEC
+#[pymethods]
+impl DistributedPlan {
+
+    fn serialize(&self) -> PyResult<Vec<u8>> {
+        PhysicalPlanNode::try_from_physical_plan(self.plan().clone(), codec())
+            .map(|node| node.encode_to_vec())
+            .map_err(py_datafusion_err)
+    }
+
+    fn partition_count(&self) -> usize {
+        self.plan().output_partitioning().partition_count()
+    }
+
+    fn num_bytes(&self) -> Option<usize> {
+        self.stats_field(|stats| stats.total_byte_size)
+    }
+
+    fn num_rows(&self) -> Option<usize> {
+        self.stats_field(|stats| stats.num_rows)
+    }
+
+    fn schema(&self) -> PyResult<PyDFSchema> {
+        DFSchema::try_from(self.plan().schema())
+            .map(PyDFSchema::from)
+            .map_err(py_datafusion_err)
+    }
+
+    fn set_desired_parallelism(&mut self, desired_parallelism: usize) -> PyResult<()> {
+        if self.plan().output_partitioning().partition_count() == desired_parallelism {
+            return Ok(())
+        }
+        let updated_plan = self.plan().clone().transform_up(|node| {
+            if let Some(parquet) = node.as_any().downcast_ref::<ParquetExec>() {
+                // Remove redundant ranges from partition files because ParquetExec refuses to repartition
+                // if any file has a range defined (even when the range actually covers the entire file).
+                // The EnforceDistribution optimizer rule adds ranges for both full and partial files,
+                // so this tries to rever that to trigger a repartition when no files are actually split.
+                let mut file_groups = parquet.base_config().file_groups.clone();
+                for group in file_groups.iter_mut() {
+                    for file in group.iter_mut() {
+                        if let Some(range) = &file.range {
+                            if range.start == 0 && range.end == file.object_meta.size as i64 {
+                                file.range = None;  // remove redundant range
+                            }
+                        }
+                    }
+                }
+                if let Some(repartitioned) = parquet.clone().into_builder().with_file_groups(file_groups)
+                    .build_arc()
+                    .repartitioned(desired_parallelism, &ConfigOptions::default())? {
+                    Ok(Transformed::yes(repartitioned))
+                } else {
+                    Ok(Transformed::no(node))
+                }
+            } else {
+                Ok(Transformed::no(node))
+            }
+        }).map_err(py_datafusion_err)?.data;
+        self.physical_plan = PyExecutionPlan::new(updated_plan);
+        Ok(())
+    }
 }
 
 impl DistributedPlan {
-    fn try_new(plan: Arc<dyn ExecutionPlan>) -> Result<Self, DataFusionError> {
-        fn extract(prec: Precision<usize>) -> Option<usize> {
-            match prec {
+
+    fn new(plan: Arc<dyn ExecutionPlan>) -> Self {
+        Self {
+            physical_plan: PyExecutionPlan::new(plan)
+        }
+    }
+
+    fn plan(&self) -> &Arc<dyn ExecutionPlan> {
+        &self.physical_plan.plan
+    }
+
+    fn stats_field(&self, field: fn(Statistics) -> Precision<usize>) -> Option<usize> {
+        if let Ok(stats) = self.physical_plan.plan.statistics() {
+            match field(stats) {
                 Precision::Exact(n) => Some(n),
                 _ => None,
             }
-        }
-        let (num_bytes, num_rows) = if let Ok(stats) = plan.statistics() {
-            let bytes = extract(stats.total_byte_size);
-            let rows = extract(stats.num_rows);
-            (bytes, rows)
         } else {
-            (None, None)
-        };
-
-        let schema = DFSchema::try_from(plan.schema())
-            .map(PyDFSchema::from)?;
-        let num_partitions = plan.properties().partitioning.partition_count();
-        let physical_plan = PhysicalPlanNode::try_from_physical_plan(plan, codec())?
-            .encode_to_vec();
-        Ok(Self { physical_plan, schema, num_partitions, num_bytes, num_rows })
+            None
+        }
     }
 
 }
@@ -721,12 +773,11 @@ impl DistributedPlan {
 #[pyfunction]
 pub fn partition_stream(serialized_plan: &[u8], partition: usize, py: Python) -> PyResult<PyRecordBatchStream> {
     deltalake::ensure_initialized();
-    let ctx = SessionContext::new();
-    let runtime = RuntimeEnvBuilder::new().build().map_err(py_datafusion_err)?;
     let node = PhysicalPlanNode::decode(serialized_plan)
         .map_err(|e| DataFusionError::External(Box::new(e)))
         .map_err(py_datafusion_err)?;
-    let plan = node.try_into_physical_plan(&ctx, &runtime, codec())
+    let ctx = SessionContext::new();
+    let plan = node.try_into_physical_plan(&ctx, ctx.runtime_env().as_ref(), codec())
         .map_err(py_datafusion_err)?;
     let stream_with_runtime = get_tokio_runtime().0.spawn(async move {
         plan.execute(partition, ctx.task_ctx())
@@ -735,6 +786,11 @@ pub fn partition_stream(serialized_plan: &[u8], partition: usize, py: Python) ->
         .map_err(py_datafusion_err)?
         .map(PyRecordBatchStream::new)
         .map_err(py_datafusion_err)
+}
+
+fn codec() -> &'static dyn PhysicalExtensionCodec {
+    static CODEC: DeltaPhysicalCodec = DeltaPhysicalCodec {};
+    &CODEC
 }
 
 /// Print DataFrame
