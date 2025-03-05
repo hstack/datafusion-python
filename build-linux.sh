@@ -20,7 +20,7 @@ case $platform in
     ;;
 esac
 
-version=$(grep -w '^version' "$root_dir/pyproject.toml" | awk -F '"' '{print $2}')
+version=$(grep -w '^version' "$root_dir/pyproject.toml" | cut -d\" -f2)
 sanitized_version=$(echo $version | tr '+' _)
 
 img_tag=docker-cja-arrow-dev.dr-uw2.adobeitc.com/datafusion-python:$sanitized_version-$platform
