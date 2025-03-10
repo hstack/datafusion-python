@@ -30,11 +30,12 @@ use datafusion::arrow::util::pretty;
 use datafusion::common::stats::Precision;
 use datafusion::common::{DFSchema, DataFusionError, Statistics, UnnestOptions};
 use datafusion::common::tree_node::{Transformed, TreeNode};
-use datafusion::config::{ConfigOptions, CsvOptions, TableParquetOptions};
+use datafusion::config::{CsvOptions, TableParquetOptions};
 use datafusion::dataframe::{DataFrame, DataFrameWriteOptions};
+use datafusion::datasource::memory::DataSourceExec;
 use datafusion::datasource::TableProvider;
-use datafusion::execution::runtime_env::RuntimeEnvBuilder;
-use datafusion::datasource::physical_plan::ParquetExec;
+use datafusion::datasource::physical_plan::FileScanConfig;
+use datafusion::datasource::source::DataSource;
 use datafusion::execution::SendableRecordBatchStream;
 use datafusion::parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
 use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties};
@@ -753,25 +754,28 @@ impl DistributedPlan {
             return Ok(())
         }
         let updated_plan = self.plan().clone().transform_up(|node| {
-            if let Some(parquet) = node.as_any().downcast_ref::<ParquetExec>() {
+            if let Some(exec) = node.as_any().downcast_ref::<DataSourceExec>() {
                 // Remove redundant ranges from partition files because ParquetExec refuses to repartition
                 // if any file has a range defined (even when the range actually covers the entire file).
                 // The EnforceDistribution optimizer rule adds ranges for both full and partial files,
                 // so this tries to rever that to trigger a repartition when no files are actually split.
-                let mut file_groups = parquet.base_config().file_groups.clone();
-                for group in file_groups.iter_mut() {
-                    for file in group.iter_mut() {
-                        if let Some(range) = &file.range {
-                            if range.start == 0 && range.end == file.object_meta.size as i64 {
-                                file.range = None;  // remove redundant range
+                if let Some(file_scan) = exec.data_source().as_any().downcast_ref::<FileScanConfig>() {
+                    let mut file_groups = file_scan.file_groups.clone();
+                    for group in file_groups.iter_mut() {
+                        for file in group.iter_mut() {
+                            if let Some(range) = &file.range {
+                                if range.start == 0 && range.end == file.object_meta.size as i64 {
+                                    file.range = None;  // remove redundant range
+                                }
                             }
                         }
                     }
-                }
-                if let Some(repartitioned) = parquet.clone().into_builder().with_file_groups(file_groups)
-                    .build_arc()
-                    .repartitioned(desired_parallelism, &ConfigOptions::default())? {
-                    Ok(Transformed::yes(repartitioned))
+                    if let Some(repartitioned) = file_scan.clone().with_file_groups(file_groups)
+                        .repartitioned(desired_parallelism, 10 * 1024 * 1024, None)? {
+                        Ok(Transformed::yes(Arc::new(DataSourceExec::new(repartitioned))))
+                    } else {
+                        Ok(Transformed::no(node))
+                    }
                 } else {
                     Ok(Transformed::no(node))
                 }
