@@ -352,7 +352,7 @@ wheels = [
 
 [[package]]
 name = "datafusion"
-version = "44.0.0+adobe.1"
+version = "46.0.0+adobe.9"
 source = { editable = "." }
 dependencies = [
     { name = "pyarrow", version = "17.0.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.9'" },
