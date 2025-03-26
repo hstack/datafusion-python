@@ -41,18 +41,20 @@ use datafusion::execution::SendableRecordBatchStream;
 use datafusion::parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
 use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties};
 use datafusion::prelude::*;
-
+use datafusion_proto::physical_plan::AsExecutionPlan;
+use datafusion_proto::protobuf::PhysicalPlanNode;
+use prost::Message;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
-use pyo3::types::{PyCapsule, PyTuple, PyTupleMethods};
+use pyo3::types::{PyBytes, PyCapsule, PyDict, PyTuple, PyTupleMethods};
 use tokio::task::JoinHandle;
 
 use crate::catalog::PyTable;
 use crate::common::df_schema::PyDFSchema;
 use crate::errors::{py_datafusion_err, PyDataFusionError};
 use crate::expr::sort_expr::to_sort_expressions;
-use crate::physical_plan::PyExecutionPlan;
+use crate::physical_plan::{codec, PyExecutionPlan};
 use crate::record_batch::PyRecordBatchStream;
 use crate::sql::logical::PyLogicalPlan;
 use crate::utils::{get_tokio_runtime, validate_pycapsule, wait_for_future};
@@ -723,10 +725,20 @@ pub struct DistributedPlan {
 #[pymethods]
 impl DistributedPlan {
     #[new]
-    fn new(physical_plan: PyExecutionPlan, min_size: usize) -> PyResult<Self> {
+    fn unmarshal(state: Bound<PyDict>) -> PyResult<Self> {
+        let ctx = SessionContext::new();
+        let serialized_plan = state
+            .get_item("plan")?
+            .expect("missing key `plan` from state");
+        let serialized_plan = serialized_plan.downcast::<PyBytes>()?.as_bytes();
+        let min_size = state
+            .get_item("min_size")?
+            .expect("missing key `min_size` from state")
+            .extract::<usize>()?;
+        let plan = deserialize_plan(serialized_plan, &ctx)?;
         Ok(Self {
             min_size,
-            physical_plan,
+            physical_plan: PyExecutionPlan::new(plan),
         })
     }
 
@@ -833,6 +845,20 @@ impl DistributedPlan {
             None
         }
     }
+}
+
+fn deserialize_plan(
+    serialized_plan: &[u8],
+    ctx: &SessionContext,
+) -> PyResult<Arc<dyn ExecutionPlan>> {
+    deltalake::ensure_initialized();
+    let node = PhysicalPlanNode::decode(serialized_plan)
+        .map_err(|e| DataFusionError::External(Box::new(e)))
+        .map_err(py_datafusion_err)?;
+    let plan = node
+        .try_into_physical_plan(ctx, ctx.runtime_env().as_ref(), codec())
+        .map_err(py_datafusion_err)?;
+    Ok(plan)
 }
 
 /// Print DataFrame
