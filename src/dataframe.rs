@@ -41,13 +41,14 @@ use datafusion::execution::SendableRecordBatchStream;
 use datafusion::parquet::basic::{BrotliLevel, Compression, GzipLevel, ZstdLevel};
 use datafusion::physical_plan::{ExecutionPlan, ExecutionPlanProperties};
 use datafusion::prelude::*;
+use datafusion::sql::unparser::plan_to_sql;
 use datafusion_proto::physical_plan::AsExecutionPlan;
 use datafusion_proto::protobuf::PhysicalPlanNode;
 use prost::Message;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::pybacked::PyBackedStr;
-use pyo3::types::{PyBytes, PyCapsule, PyDict, PyTuple, PyTupleMethods};
+use pyo3::types::{PyBytes, PyCapsule, PyDict, PyString, PyTuple, PyTupleMethods};
 use tokio::task::JoinHandle;
 
 use crate::catalog::PyTable;
@@ -712,6 +713,13 @@ impl PyDataFrame {
     fn distributed_plan(&self, py: Python<'_>) -> PyResult<DistributedPlan> {
         let future_plan = DistributedPlan::try_new(self.df.as_ref());
         wait_for_future(py, future_plan).map_err(py_datafusion_err)
+    }
+
+    fn plan_sql(&self, py: Python<'_>) -> PyResult<PyObject> {
+        let logical_plan = self.df.logical_plan();
+
+        let sql = plan_to_sql(logical_plan).map_err(py_datafusion_err)?;
+        Ok(PyString::new(py, sql.to_string().as_ref()).into())
     }
 }
 
