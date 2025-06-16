@@ -66,6 +66,23 @@ lto = false
 codegen-units = 1
 
 [patch.crates-io]
+# TODO: remove after version bump to 55.2.0
+# temporary pinning arrow to get this patch:
+# https://github.com/apache/arrow-rs/commit/e9df239980baa6d0f7eb4384eb01078bdd9b1701
+
+arrow-select = { git = 'https://github.com/apache/arrow-rs.git', rev = 'e9df239980baa6d0f7eb4384eb01078bdd9b1701' }
+arrow-cast = { git = 'https://github.com/apache/arrow-rs.git', rev = 'e9df239980baa6d0f7eb4384eb01078bdd9b1701' }
+arrow-string = { git = 'https://github.com/apache/arrow-rs.git', rev = 'e9df239980baa6d0f7eb4384eb01078bdd9b1701' }
+arrow-ord = { git = 'https://github.com/apache/arrow-rs.git', rev = 'e9df239980baa6d0f7eb4384eb01078bdd9b1701' }
+arrow-json = { git = 'https://github.com/apache/arrow-rs.git', rev = 'e9df239980baa6d0f7eb4384eb01078bdd9b1701' }
+arrow-csv = { git = 'https://github.com/apache/arrow-rs.git', rev = 'e9df239980baa6d0f7eb4384eb01078bdd9b1701' }
+arrow-schema = { git = 'https://github.com/apache/arrow-rs.git', rev = 'e9df239980baa6d0f7eb4384eb01078bdd9b1701' }
+arrow-array = { git = 'https://github.com/apache/arrow-rs.git', rev = 'e9df239980baa6d0f7eb4384eb01078bdd9b1701' }
+arrow-buffer = { git = 'https://github.com/apache/arrow-rs.git', rev = 'e9df239980baa6d0f7eb4384eb01078bdd9b1701' }
+arrow-data = { git = 'https://github.com/apache/arrow-rs.git', rev = 'e9df239980baa6d0f7eb4384eb01078bdd9b1701' }
+arrow-arith = { git = 'https://github.com/apache/arrow-rs.git', rev = 'e9df239980baa6d0f7eb4384eb01078bdd9b1701' }
+
+
 datafusion = { git = 'https://github.com/hstack/arrow-datafusion.git', branch = 'main' }
 datafusion-catalog = { git = 'https://github.com/hstack/arrow-datafusion.git', branch = 'main' }
 datafusion-catalog-listing = { git = 'https://github.com/hstack/arrow-datafusion.git', branch = 'main' }
