@@ -826,9 +826,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-runtime"
-version = "1.8.3"
+version = "1.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14302f06d1d5b7d333fd819943075b13d27c7700b414f574c3c35859bfb55d5e"
+checksum = "c3aaec682eb189e43c8a19c3dab2fe54590ad5f2cc2d26ab27608a20f2acf81c"
 dependencies = [
  "aws-smithy-async",
  "aws-smithy-http",
@@ -850,9 +850,9 @@ dependencies = [
 
 [[package]]
 name = "aws-smithy-runtime-api"
-version = "1.8.1"
+version = "1.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bd8531b6d8882fd8f48f82a9754e682e29dd44cff27154af51fa3eb730f59efb"
+checksum = "9852b9226cb60b78ce9369022c0df678af1cac231c882d5da97a0c4e03be6e67"
 dependencies = [
  "aws-smithy-async",
  "aws-smithy-types",
@@ -1121,9 +1121,9 @@ dependencies = [
 
 [[package]]
 name = "cc"
-version = "1.2.27"
+version = "1.2.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d487aa071b5f64da6f19a3e848e3578944b726ee5a4854b82172f02aa876bfdc"
+checksum = "5c1599538de2394445747c8cf7935946e3cc27e9625f889d979bfb2aaf569362"
 dependencies = [
  "jobserver",
  "libc",
@@ -2171,7 +2171,7 @@ dependencies = [
 [[package]]
 name = "deltalake"
 version = "0.26.2"
-source = "git+https://github.com/hstack/delta-rs.git?branch=main#ea51fb78ab04bca4113515a0e3292bc35e5340b2"
+source = "git+https://github.com/hstack/delta-rs.git?branch=main#a57fda252527b3aef8351303e0c799a165fe05bc"
 dependencies = [
  "delta_kernel",
  "deltalake-aws",
@@ -2182,7 +2182,7 @@ dependencies = [
 [[package]]
 name = "deltalake-aws"
 version = "0.9.1"
-source = "git+https://github.com/hstack/delta-rs.git?branch=main#ea51fb78ab04bca4113515a0e3292bc35e5340b2"
+source = "git+https://github.com/hstack/delta-rs.git?branch=main#a57fda252527b3aef8351303e0c799a165fe05bc"
 dependencies = [
  "async-trait",
  "aws-config",
@@ -2208,7 +2208,7 @@ dependencies = [
 [[package]]
 name = "deltalake-azure"
 version = "0.9.1"
-source = "git+https://github.com/hstack/delta-rs.git?branch=main#ea51fb78ab04bca4113515a0e3292bc35e5340b2"
+source = "git+https://github.com/hstack/delta-rs.git?branch=main#a57fda252527b3aef8351303e0c799a165fe05bc"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2225,7 +2225,7 @@ dependencies = [
 [[package]]
 name = "deltalake-core"
 version = "0.26.2"
-source = "git+https://github.com/hstack/delta-rs.git?branch=main#ea51fb78ab04bca4113515a0e3292bc35e5340b2"
+source = "git+https://github.com/hstack/delta-rs.git?branch=main#a57fda252527b3aef8351303e0c799a165fe05bc"
 dependencies = [
  "arrow",
  "arrow-arith",
@@ -2282,7 +2282,7 @@ dependencies = [
 [[package]]
 name = "deltalake-derive"
 version = "0.26.0"
-source = "git+https://github.com/hstack/delta-rs.git?branch=main#ea51fb78ab04bca4113515a0e3292bc35e5340b2"
+source = "git+https://github.com/hstack/delta-rs.git?branch=main#a57fda252527b3aef8351303e0c799a165fe05bc"
 dependencies = [
  "convert_case",
  "itertools 0.14.0",
@@ -2845,9 +2845,9 @@ dependencies = [
 
 [[package]]
 name = "hyper-util"
-version = "0.1.14"
+version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc2fdfdbff08affe55bb779f33b053aa1fe5dd5b54c257343c17edfa55711bdb"
+checksum = "7f66d5bd4c6f02bf0542fad85d626775bab9258cf795a4256dcaf3161114d1df"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -5049,9 +5049,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.46.0"
+version = "1.46.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1140bb80481756a8cbe10541f37433b459c5aa1e727b4c020fbfebdc25bf3ec4"
+checksum = "0cc3a2344dafbe23a245241fe8b09735b521110d30fcefbbd5feb1797ca35d17"
 dependencies = [
  "backtrace",
  "bytes",

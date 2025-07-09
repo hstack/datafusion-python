@@ -883,13 +883,15 @@ impl DistributedPlan {
                     // if any file has a range defined (even when the range actually covers the entire file).
                     // The EnforceDistribution optimizer rule adds ranges for both full and partial files,
                     // so this tries to revert that in order to trigger a repartition when no files are actually split.
+                    // TODO: check whether EnforceDistribution is still adding redundant ranges and remove this
+                    //  workaround if no longer needed.
                     if let Some(file_scan) =
                         exec.data_source().as_any().downcast_ref::<FileScanConfig>()
                     {
                         let mut range_free_file_scan = file_scan.clone();
                         let mut total_size: usize = 0;
                         for group in range_free_file_scan.file_groups.iter_mut() {
-                            for group_idx in 0..group.len()-1 {
+                            for group_idx in 0..group.len() {
                                 let file = group.index_mut(group_idx);
                                 if let Some(range) = &file.range {
                                     total_size += (range.end - range.start) as usize;
@@ -900,19 +902,7 @@ impl DistributedPlan {
                                 } else {
                                     total_size += file.object_meta.size as usize;
                                 }
-                                
                             }
-                            // for file in group.iter_mut() {
-                            //     if let Some(range) = &file.range {
-                            //         total_size += (range.end - range.start) as usize;
-                            //         if range.start == 0 && range.end == file.object_meta.size as i64
-                            //         {
-                            //             file.range = None; // remove redundant range
-                            //         }
-                            //     } else {
-                            //         total_size += file.object_meta.size;
-                            //     }
-                            // }
                         }
                         let min_size_buckets = max(1, total_size.div_ceil(self.min_size));
                         let partitions = min(min_size_buckets, desired_parallelism);
