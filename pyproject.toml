@@ -45,7 +45,7 @@ classifiers = [
 ]
 dependencies = ["pyarrow>=11.0.0", "typing-extensions;python_version<'3.13'"]
 #dynamic = ["version"]
-version = "47.0.0+adobe.4"
+version = "47.0.0+adobe.5"
 
 [project.urls]
 homepage = "https://datafusion.apache.org/python"

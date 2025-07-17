@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 mkdir -p ./target-linux/wheels
 
@@ -44,7 +45,7 @@ which jfrog || brew install jfrog-cli
 jfrog rt upload --url https://artifactory-uw2.adobeitc.com/artifactory \
   --user ${ARTIFACTORY_USER:-$ARTIFACTORY_USERNAME} \
   --password ${ARTIFACTORY_UW2_TOKEN:-$ARTIFACTORY_API_TOKEN} \
-  $wheel pypi-arrow-release/datafusion/$version/
+  $wheel pypi-arrow-release/datafusion/$version/ && rm -v $wheel
 
 ## Artifactory Corp
 #jfrog rt upload --url https://artifactory.corp.adobe.com/artifactory \
