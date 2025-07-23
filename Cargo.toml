@@ -51,6 +51,8 @@ futures = "0.3"
 object_store = { version = "0.12.1", features = ["aws", "gcp", "azure", "http"] }
 url = "2"
 log = "0.4.27"
+deltalake = { version = "0.28.0", features = ["datafusion", "azure", "s3"] }
+env_logger = "0.11.7"
 
 [build-dependencies]
 prost-types = "0.13.1" # keep in line with `datafusion-substrait`
@@ -96,4 +98,5 @@ datafusion-proto-common = { git = 'https://github.com/hstack/datafusion.git', br
 datafusion-session = { git = 'https://github.com/hstack/datafusion.git', branch = 'main' }
 datafusion-sql = { git = 'https://github.com/hstack/datafusion.git', branch = 'main' }
 datafusion-substrait = { git = 'https://github.com/hstack/datafusion.git', branch = 'main' }
+deltalake = { git = 'https://github.com/hstack/delta-rs.git', branch = 'main' }
 reqwest = { git = 'https://github.com/hstack/reqwest.git', branch = 'main' }

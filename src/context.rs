@@ -320,6 +320,13 @@ impl PySessionContext {
         } else {
             RuntimeEnvBuilder::default()
         };
+        deltalake::azure::register_handlers(None);
+        deltalake::aws::register_handlers(None);
+        let _ = env_logger::try_init();
+
+        let config = config.set_bool("datafusion.sql_parser.enable_ident_normalization", false);
+
+
         let runtime = Arc::new(runtime_env_builder.build()?);
         let session_state = SessionStateBuilder::new()
             .with_config(config)
@@ -874,6 +881,21 @@ impl PySessionContext {
         self.ctx.register_udwf(udwf.function);
         Ok(())
     }
+
+    pub fn register_delta_table(
+        &self,
+        name: &str,
+        table_uri: &str,
+        storage_opts: HashMap<String, String>,
+        py: Python,
+    ) -> PyResult<()> {
+        deltalake::ensure_initialized();
+        let table = deltalake::open_table_with_storage_options(table_uri, storage_opts);
+        let table = wait_for_future(py, table)?.map_err(py_datafusion_err)?;
+        self.ctx.register_table(name, Arc::new(table)).map_err(py_datafusion_err)?;
+        Ok(())
+    }
+
 
     #[pyo3(signature = (name="datafusion"))]
     pub fn catalog(&self, name: &str) -> PyResult<PyObject> {
