@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 
 FROM quay.io/pypa/manylinux_2_28_x86_64 AS base
+ARG TARGETARCH
 
 WORKDIR /root
 
@@ -9,16 +10,23 @@ RUN <<EOF
   dnf install -y curl pkg-config openssl ca-certificates openssl-devel patchelf autoconf automake make libtool unzip clang libatomic openssh-clients wget
 EOF
 
+# Install a newer version of protoc than is available in rocky linux
+ARG PROTOC_VERSION=29.3
 RUN <<EOF
-  # echo 1
-  wget https://github.com/protocolbuffers/protobuf/archive/refs/tags/v3.21.12.zip
-  unzip v3.21.12.zip
-  cd protobuf-3.21.12
-  autoupdate
-  ./autogen.sh
-  ./configure --prefix=/usr --disable-dependency-tracking
-  make -j8
-  make install
+set -e
+if [ "${TARGETARCH}" = "amd64" ]; then
+    PROTOC_ARCH=x86_64
+elif [ "${TARGETARCH}" = "arm64" ]; then
+    PROTOC_ARCH=aarch_64
+else
+    echo "Unsupported architecture: ${TARGETARCH}"
+    exit 1
+fi
+PROTOC_ZIP=protoc-${PROTOC_VERSION}-linux-$PROTOC_ARCH.zip
+wget https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/$PROTOC_ZIP
+unzip -o "$PROTOC_ZIP" -d /usr/local bin/protoc
+unzip -o "$PROTOC_ZIP" -d /usr/local 'include/*'
+rm -f "$PROTOC_ZIP"
 EOF
 
 RUN <<EOF
@@ -44,7 +52,7 @@ RUN --mount=type=bind,source=src,target=src,readwrite \
     --mount=type=cache,mode=0777,target=/usr/local/cargo/registry/ \
     --mount=type=ssh,mode=0666 \
     <<EOF
-  export PATH="/root/.cargo/bin:/opt/python/cp312-cp312/bin:$PATH"
+  export PATH="/usr/local/bin:/root/.cargo/bin:/opt/python/cp312-cp312/bin:$PATH"
   python3 -m venv venv
   source venv/bin/activate
   source /root/.cargo/env
