@@ -34,7 +34,7 @@ use pyo3::prelude::*;
 use crate::catalog::{PyCatalog, PyTable, RustWrappedPyCatalogProvider};
 use crate::dataframe::PyDataFrame;
 use crate::dataset::Dataset;
-use crate::errors::{py_datafusion_err, to_datafusion_err, PyDataFusionResult};
+use crate::errors::{py_datafusion_err, py_runtime_err, to_datafusion_err, PyDataFusionResult};
 use crate::expr::sort_expr::PySortExpr;
 use crate::physical_plan::PyExecutionPlan;
 use crate::record_batch::PyRecordBatchStream;
@@ -72,6 +72,7 @@ use datafusion::prelude::{
 };
 use datafusion_ffi::catalog_provider::{FFI_CatalogProvider, ForeignCatalogProvider};
 use datafusion_ffi::table_provider::{FFI_TableProvider, ForeignTableProvider};
+use deltalake::ensure_table_uri;
 use pyo3::types::{PyCapsule, PyDict, PyList, PyTuple, PyType};
 use pyo3::IntoPyObjectExt;
 use tokio::task::JoinHandle;
@@ -320,6 +321,13 @@ impl PySessionContext {
         } else {
             RuntimeEnvBuilder::default()
         };
+        deltalake::azure::register_handlers(None);
+        deltalake::aws::register_handlers(None);
+        let _ = env_logger::try_init();
+
+        let config = config.set_bool("datafusion.sql_parser.enable_ident_normalization", false);
+
+
         let runtime = Arc::new(runtime_env_builder.build()?);
         let session_state = SessionStateBuilder::new()
             .with_config(config)
@@ -874,6 +882,22 @@ impl PySessionContext {
         self.ctx.register_udwf(udwf.function);
         Ok(())
     }
+
+    pub fn register_delta_table(
+        &self,
+        name: &str,
+        table_uri: &str,
+        storage_opts: HashMap<String, String>,
+        py: Python,
+    ) -> PyResult<()> {
+        deltalake::ensure_initialized();
+        let table_uri = ensure_table_uri(table_uri).map_err(py_runtime_err)?;
+        let table = deltalake::open_table_with_storage_options(table_uri, storage_opts);
+        let table = wait_for_future(py, table)?.map_err(py_datafusion_err)?;
+        self.ctx.register_table(name, Arc::new(table)).map_err(py_datafusion_err)?;
+        Ok(())
+    }
+
 
     #[pyo3(signature = (name="datafusion"))]
     pub fn catalog(&self, name: &str) -> PyResult<PyObject> {

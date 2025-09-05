@@ -585,6 +585,9 @@ class SessionContext:
             self._convert_file_sort_order(file_sort_order),
         )
 
+    def register_delta_table(self, name: str, table_uri: str, storage_opts: dict[str, str] = {}):
+        self.ctx.register_delta_table(name, table_uri, storage_opts)
+
     def sql(self, query: str, options: SQLOptions | None = None) -> DataFrame:
         """Create a :py:class:`~datafusion.DataFrame` from SQL query text.
 
